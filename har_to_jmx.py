@@ -173,23 +173,49 @@ def build_testplan_from_har(har_path: str, testplan_name: str = "HAR import plan
         method = req.get("method", "GET").upper()
         url = req.get("url", "")
 
-        if method not in ALLOWED_METHODS:
-            continue
-        if should_ignore(url):
-            continue
-        if not is_allowed_domain(url):
-            continue
+        if method not in ALLOWED_METHODS: continue
+        if should_ignore(url): continue
+        if not is_allowed_domain(url): continue
 
-        body = None
-        post_data = req.get("postData")
-        if post_data and "text" in post_data:
-            body = post_data["text"]
+        body = req.get("postData", {}).get("text") if req.get("postData") else None
 
         name = f"{i:03d} {method} {url}"
         sampler = create_http_sampler(name, url, method, body)
         tg_ht.append(sampler)
-        # Кожен sampler має свій порожній hashTree
+        ET.SubElement(tg_ht, "hashTree")  # empty sampler tree
+
+        # --- ADD HEADERS ---
+        headers = req.get("headers", [])
+        header_manager = ET.Element("HeaderManager", {
+            "guiclass": "HeaderPanel",
+            "testclass": "HeaderManager",
+            "testname": f"Headers → {method} {urlparse(url).path}",
+            "enabled": "true"
+        })
+
+        header_collection = ET.SubElement(header_manager, "collectionProp", {
+            "name": "HeaderManager.headers"
+        })
+
+        SKIP_HEADERS = {"content-length", "host", "accept-encoding"}
+
+        for h in headers:
+            name = h.get("name", "").strip()
+            value = h.get("value", "").strip()
+            if not name or name.lower() in SKIP_HEADERS:  
+                continue
+
+            hp = ET.Element("elementProp", {
+                "name": name,
+                "elementType": "Header"
+            })
+            hp.append(string_prop("Header.name", name))
+            hp.append(string_prop("Header.value", value))
+            header_collection.append(hp)
+
+        tg_ht.append(header_manager)
         ET.SubElement(tg_ht, "hashTree")
+
 
     return root
 
