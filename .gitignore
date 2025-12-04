@@ -1,0 +1,8 @@
+# Ignore everything
+*
+
+# Except this file
+!har_to_jmx.py
+
+# Also allow the .gitignore itself
+!.gitignore
