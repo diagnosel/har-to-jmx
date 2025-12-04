@@ -1,5 +1,9 @@
 # Ignore everything
 *
+*.har
+*.jmx
+*.DS_Store
+__pycache__/
 
 # Except this file
 !har_to_jmx.py
