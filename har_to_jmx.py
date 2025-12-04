@@ -61,6 +61,7 @@ def create_http_sampler(name, url, method, body=None):
     domain = parsed.hostname or ""
     path = parsed.path or "/"
     port = parsed.port or ""
+    query = parsed.query or ""
 
     sampler = ET.Element("HTTPSamplerProxy", {
         "guiclass": "HttpTestSampleGui",
@@ -69,7 +70,7 @@ def create_http_sampler(name, url, method, body=None):
         "enabled": "true",
     })
 
-    # ❌ НЕ raw mode → використовуємо Parameters tab
+    # Працюємо через Parameters, а не raw body
     sampler.append(bool_prop("HTTPSampler.postBodyRaw", False))
 
     # ------- ARGUMENTS BLOCK -------
@@ -85,15 +86,13 @@ def create_http_sampler(name, url, method, body=None):
         "name": "Arguments.arguments"
     })
 
-    # Якщо є form-urlencoded body → розбираємо
-    if body and "=" in body:
-        for pair in body.split("&"):
+    # ---- 1) Query-параметри з URL (GET / будь-який метод з ?a=1&b=2) ----
+    if query:
+        for pair in query.split("&"):
             if "=" not in pair:
                 continue
-
             k, v = pair.split("=", 1)
 
-            # 🔥 Decode тільки щоб нормально показувати в UI
             k = unquote(k)
             v = unquote(v)
 
@@ -103,20 +102,45 @@ def create_http_sampler(name, url, method, body=None):
                 "enabled": "true",
             })
 
-            # ---- core props ----
+            # основні поля
             arg.append(string_prop("Argument.name", k))
             arg.append(string_prop("Argument.value", v))
             arg.append(string_prop("Argument.metadata", "="))
 
-            # 🔥 ключова частина → JMeter показує декодований текст,
-            # але encode-ить автоматично при виконанні
+            # галочка URL Encode? → JMeter показує декодоване, шле encoded
             arg.append(bool_prop("HTTPArgument.always_encode", True))
             arg.append(bool_prop("HTTPArgument.use_equals", True))
             arg.append(string_prop("HTTPArgument.encoded", "false"))
 
             params_list.append(arg)
 
-    # Додаємо параметри в sampler
+    # ---- 2) Параметри з body (form-urlencoded) ----
+    if body and "=" in body:
+        for pair in body.split("&"):
+            if "=" not in pair:
+                continue
+            k, v = pair.split("=", 1)
+
+            k = unquote(k)
+            v = unquote(v)
+
+            arg = ET.Element("elementProp", {
+                "name": k,
+                "elementType": "HTTPArgument",
+                "enabled": "true",
+            })
+
+            arg.append(string_prop("Argument.name", k))
+            arg.append(string_prop("Argument.value", v))
+            arg.append(string_prop("Argument.metadata", "="))
+
+            arg.append(bool_prop("HTTPArgument.always_encode", True))
+            arg.append(bool_prop("HTTPArgument.use_equals", True))
+            arg.append(string_prop("HTTPArgument.encoded", "false"))
+
+            params_list.append(arg)
+
+    # Додаємо всі параметри в sampler
     element_prop.append(params_list)
     sampler.append(element_prop)
 
