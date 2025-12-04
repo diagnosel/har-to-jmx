@@ -4,6 +4,7 @@
 *.jmx
 *.DS_Store
 __pycache__/
+.DS_Store
 
 # Except this file
 !har_to_jmx.py
