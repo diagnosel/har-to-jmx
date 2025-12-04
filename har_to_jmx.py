@@ -1,7 +1,7 @@
 import json
 import sys
 import xml.etree.ElementTree as ET
-from urllib.parse import urlparse
+from urllib.parse import urlparse, unquote
 
 # ------------ НАЛАШТУВАННЯ ------------- #
 ALLOWED_METHODS = {"GET", "POST"}
@@ -52,6 +52,9 @@ def string_prop(name, value):
 
 # ------------ ПОБУДОВА JMX ------------- #
 
+
+
+
 def create_http_sampler(name, url, method, body=None):
     parsed = urlparse(url)
     protocol = parsed.scheme
@@ -66,10 +69,10 @@ def create_http_sampler(name, url, method, body=None):
         "enabled": "true",
     })
 
-    # 🚫 НЕ ставимо raw body → це активує Parameters mode
+    # ❌ НЕ raw mode → використовуємо Parameters tab
     sampler.append(bool_prop("HTTPSampler.postBodyRaw", False))
 
-    # ------- PARAMS BLOCK -------
+    # ------- ARGUMENTS BLOCK -------
     element_prop = ET.Element("elementProp", {
         "name": "HTTPsampler.Arguments",
         "elementType": "Arguments",
@@ -77,15 +80,22 @@ def create_http_sampler(name, url, method, body=None):
         "testclass": "Arguments",
         "enabled": "true",
     })
+
     params_list = ET.Element("collectionProp", {
         "name": "Arguments.arguments"
     })
 
+    # Якщо є form-urlencoded body → розбираємо
     if body and "=" in body:
         for pair in body.split("&"):
             if "=" not in pair:
                 continue
+
             k, v = pair.split("=", 1)
+
+            # 🔥 Decode тільки щоб нормально показувати в UI
+            k = unquote(k)
+            v = unquote(v)
 
             arg = ET.Element("elementProp", {
                 "name": k,
@@ -93,12 +103,20 @@ def create_http_sampler(name, url, method, body=None):
                 "enabled": "true",
             })
 
-            arg.append(bool_prop("HTTPArgument.always_encode", False))
+            # ---- core props ----
             arg.append(string_prop("Argument.name", k))
             arg.append(string_prop("Argument.value", v))
-            arg.append(string_prop("Argument.metadata", "="))  # 🧪 важливо!
+            arg.append(string_prop("Argument.metadata", "="))
+
+            # 🔥 ключова частина → JMeter показує декодований текст,
+            # але encode-ить автоматично при виконанні
+            arg.append(bool_prop("HTTPArgument.always_encode", True))
+            arg.append(bool_prop("HTTPArgument.use_equals", True))
+            arg.append(string_prop("HTTPArgument.encoded", "false"))
+
             params_list.append(arg)
 
+    # Додаємо параметри в sampler
     element_prop.append(params_list)
     sampler.append(element_prop)
 
@@ -118,6 +136,49 @@ def create_http_sampler(name, url, method, body=None):
 
     return sampler
 
+def build_cookie_manager(cookies):
+    cm = ET.Element("CookieManager", {
+        "guiclass": "CookiePanel",
+        "testclass": "CookieManager",
+        "testname": "Browser Cookies",
+        "enabled": "true",
+    })
+
+    prop = ET.SubElement(cm, "collectionProp", {"name": "CookieManager.cookies"})
+
+    for cookie in cookies:
+        c = ET.Element("elementProp", {"name": cookie["name"], "elementType": "Cookie"})
+        c.append(string_prop("Cookie.name", cookie["name"]))
+        c.append(string_prop("Cookie.value", cookie["value"]))
+        c.append(string_prop("Cookie.domain", cookie["domain"]))
+        c.append(string_prop("Cookie.path", cookie.get("path", "/")))
+        prop.append(c)
+
+    return cm
+
+def build_header_manager(headers):
+    hm = ET.Element("HeaderManager", {
+        "guiclass": "HeaderPanel",
+        "testclass": "HeaderManager",
+        "testname": "Request Headers",
+        "enabled": "true"
+    })
+
+    prop = ET.SubElement(hm, "collectionProp", {"name": "HeaderManager.headers"})
+    skip = {"content-length", "host"}
+
+    for h in headers:
+        name = h.get("name", "").strip()
+        value = h.get("value", "").strip()
+        if not name or name.lower() in skip:
+            continue
+
+        hp = ET.Element("elementProp", {"name": name, "elementType": "Header"})
+        hp.append(string_prop("Header.name", name))
+        hp.append(string_prop("Header.value", value))
+        prop.append(hp)
+
+    return hm
 
 
 def build_testplan_from_har(har_path: str, testplan_name: str = "HAR import plan"):
