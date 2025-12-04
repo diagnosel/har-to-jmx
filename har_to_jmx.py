@@ -53,9 +53,6 @@ def string_prop(name, value):
 # ------------ ПОБУДОВА JMX ------------- #
 
 def create_http_sampler(name, url, method, body=None):
-    """
-    Створює HTTPSamplerProxy елемент для JMeter.
-    """
     parsed = urlparse(url)
     protocol = parsed.scheme
     domain = parsed.hostname or ""
@@ -69,9 +66,10 @@ def create_http_sampler(name, url, method, body=None):
         "enabled": "true",
     })
 
-    sampler.append(bool_prop("HTTPSampler.postBodyRaw", bool(body)))
+    # 🚫 НЕ ставимо raw body → це активує Parameters mode
+    sampler.append(bool_prop("HTTPSampler.postBodyRaw", False))
 
-    # Arguments (простий варіант — пустий, або body як один параметр)
+    # ------- PARAMS BLOCK -------
     element_prop = ET.Element("elementProp", {
         "name": "HTTPsampler.Arguments",
         "elementType": "Arguments",
@@ -79,30 +77,38 @@ def create_http_sampler(name, url, method, body=None):
         "testclass": "Arguments",
         "enabled": "true",
     })
-    collection = ET.Element("collectionProp", {
+    params_list = ET.Element("collectionProp", {
         "name": "Arguments.arguments"
     })
 
-    if body:
-        arg = ET.Element("elementProp", {
-            "name": "",
-            "elementType": "HTTPArgument",
-            "enabled": "true",
-        })
-        arg.append(bool_prop("HTTPArgument.always_encode", False))
-        arg.append(string_prop("Argument.name", "body"))
-        arg.append(string_prop("Argument.value", body))
-        arg.append(string_prop("Argument.metadata", "="))
-        collection.append(arg)
+    if body and "=" in body:
+        for pair in body.split("&"):
+            if "=" not in pair:
+                continue
+            k, v = pair.split("=", 1)
 
-    element_prop.append(collection)
+            arg = ET.Element("elementProp", {
+                "name": k,
+                "elementType": "HTTPArgument",
+                "enabled": "true",
+            })
+
+            arg.append(bool_prop("HTTPArgument.always_encode", False))
+            arg.append(string_prop("Argument.name", k))
+            arg.append(string_prop("Argument.value", v))
+            arg.append(string_prop("Argument.metadata", "="))  # 🧪 важливо!
+            params_list.append(arg)
+
+    element_prop.append(params_list)
     sampler.append(element_prop)
 
+    # ------- URL settings -------
     sampler.append(string_prop("HTTPSampler.domain", domain))
     sampler.append(string_prop("HTTPSampler.port", str(port)))
     sampler.append(string_prop("HTTPSampler.protocol", protocol))
     sampler.append(string_prop("HTTPSampler.path", path))
     sampler.append(string_prop("HTTPSampler.method", method))
+
     sampler.append(bool_prop("HTTPSampler.follow_redirects", True))
     sampler.append(bool_prop("HTTPSampler.auto_redirects", False))
     sampler.append(bool_prop("HTTPSampler.use_keepalive", True))
@@ -111,6 +117,7 @@ def create_http_sampler(name, url, method, body=None):
     sampler.append(string_prop("HTTPSampler.embedded_url_re", ""))
 
     return sampler
+
 
 
 def build_testplan_from_har(har_path: str, testplan_name: str = "HAR import plan"):
