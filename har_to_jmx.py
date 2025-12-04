@@ -20,6 +20,8 @@ IGNORE_SUBSTRINGS = [
     "doubleclick.net",
 ]
 
+PRIMARY_DOMAIN = next(iter(ALLOWED_DOMAINS)) 
+
 # ------------ ДОПОМІЖНІ ФУНКЦІЇ ------------- #
 
 def should_ignore(url: str) -> bool:
@@ -196,12 +198,21 @@ def build_header_manager(headers):
         if not name or name.lower() in skip:
             continue
 
-        hp = ET.Element("elementProp", {"name": name, "elementType": "Header"})
+        # 🔥 Автоматична заміна домену без хардкоду
+        value = value.replace(f"https://{PRIMARY_DOMAIN}", "https://${base_url}")
+        value = value.replace(f"http://{PRIMARY_DOMAIN}", "http://${base_url}")
+        value = value.replace(PRIMARY_DOMAIN, "${base_url}")
+
+        hp = ET.Element("elementProp", {
+            "name": name,
+            "elementType": "Header"
+        })
         hp.append(string_prop("Header.name", name))
         hp.append(string_prop("Header.value", value))
         prop.append(hp)
 
     return hm
+
 
 
 def build_testplan_from_har(har_path: str, testplan_name: str = "HAR import plan"):
@@ -210,7 +221,6 @@ def build_testplan_from_har(har_path: str, testplan_name: str = "HAR import plan
 
     entries = har.get("log", {}).get("entries", [])
 
-    # Кореневий елемент JMX
     root = ET.Element("jmeterTestPlan", {
         "version": "1.2",
         "properties": "5.0",
@@ -218,7 +228,7 @@ def build_testplan_from_har(har_path: str, testplan_name: str = "HAR import plan
     })
     root_ht = ET.SubElement(root, "hashTree")
 
-    # TestPlan
+    # -------- Test Plan --------
     testplan = ET.SubElement(root_ht, "TestPlan", {
         "guiclass": "TestPlanGui",
         "testclass": "TestPlan",
@@ -232,7 +242,7 @@ def build_testplan_from_har(har_path: str, testplan_name: str = "HAR import plan
 
     testplan_ht = ET.SubElement(root_ht, "hashTree")
 
-    # ThreadGroup
+    # -------- Thread Group --------
     tg = ET.SubElement(testplan_ht, "ThreadGroup", {
         "guiclass": "ThreadGroupGui",
         "testclass": "ThreadGroup",
@@ -244,7 +254,7 @@ def build_testplan_from_har(har_path: str, testplan_name: str = "HAR import plan
     tg.append(bool_prop("ThreadGroup.scheduler", False))
     tg.append(string_prop("ThreadGroup.duration", ""))
     tg.append(string_prop("ThreadGroup.delay", ""))
-    # loop count = 1
+
     loop = ET.Element("elementProp", {
         "name": "ThreadGroup.main_controller",
         "elementType": "LoopController",
@@ -252,71 +262,44 @@ def build_testplan_from_har(har_path: str, testplan_name: str = "HAR import plan
         "testclass": "LoopController",
         "enabled": "true",
     })
+
     loop.append(bool_prop("LoopController.continue_forever", False))
     loop.append(string_prop("LoopController.loops", "1"))
     tg.append(loop)
 
     tg_ht = ET.SubElement(testplan_ht, "hashTree")
 
-    # Додаємо HTTP Samplers
+    # -------- Requests from HAR --------
     for i, entry in enumerate(entries, start=1):
         req = entry.get("request", {})
         method = req.get("method", "GET").upper()
         url = req.get("url", "")
 
-        if method not in ALLOWED_METHODS: continue
-        if should_ignore(url): continue
-        if not is_allowed_domain(url): continue
+        if method not in ALLOWED_METHODS:
+            continue
+        if should_ignore(url):
+            continue
+        if not is_allowed_domain(url):
+            continue
 
         body = req.get("postData", {}).get("text") if req.get("postData") else None
 
         name = f"{i:03d} {method} {url}"
         sampler = create_http_sampler(name, url, method, body)
 
-        # додаємо request
         tg_ht.append(sampler)
-
-        # створюємо вкладений hashTree для request
         sampler_hash = ET.SubElement(tg_ht, "hashTree")
 
-        # ------- HEADERS (nested under request) -------
+        # ------- Headers --------
         headers = req.get("headers", [])
-        header_manager = ET.Element("HeaderManager", {
-            "guiclass": "HeaderPanel",
-            "testclass": "HeaderManager",
-            "testname": "Headers",
-            "enabled": "true"
-        })
+        header_manager = build_header_manager(headers)
 
-        header_collection = ET.SubElement(header_manager, "collectionProp", {
-            "name": "HeaderManager.headers"
-        })
-
-        SKIP_HEADERS = {"content-length", "host", "accept-encoding"}
-
-        for h in headers:
-            name = h.get("name", "").strip()
-            value = h.get("value", "").strip()
-            if not name or name.lower() in SKIP_HEADERS:
-                continue
-
-            hp = ET.Element("elementProp", {
-                "name": name,
-                "elementType": "Header"
-            })
-            hp.append(string_prop("Header.name", name))
-            hp.append(string_prop("Header.value", value))
-            header_collection.append(hp)
-
-        # додаємо HeaderManager всередину запиту
         sampler_hash.append(header_manager)
-
-        # hashTree під HeaderManager також потрібен
-        ET.SubElement(sampler_hash, "hashTree")
-
-
+        ET.SubElement(sampler_hash, "hashTree")  # ✔️ only one
 
     return root
+
+
 
 
 def save_jmx(root: ET.Element, output_path: str):
