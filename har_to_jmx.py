@@ -7,7 +7,7 @@ from urllib.parse import urlparse, unquote
 ALLOWED_METHODS = {"GET", "POST"}
 # Додай сюди свої домени (регістро-незалежно)
 ALLOWED_DOMAINS = {
-    "preprod.ilmakiage.com",
+    "preprod.ilmakiageny.com",
     "quiz-api.preprod.ilmakiage.com",
 }
 
@@ -58,10 +58,14 @@ def string_prop(name, value):
 def create_http_sampler(name, url, method, body=None):
     parsed = urlparse(url)
     protocol = parsed.scheme
-    domain = parsed.hostname or ""
+    original_domain = parsed.hostname or ""
     path = parsed.path or "/"
     port = parsed.port or ""
     query = parsed.query or ""
+
+    # 🔥 Якщо URL містить домен — прибираємо його і будуємо шлях
+    if url.startswith("http"):
+        url = url.replace(f"{protocol}://{original_domain}", "${base_url}")
 
     sampler = ET.Element("HTTPSamplerProxy", {
         "guiclass": "HttpTestSampleGui",
@@ -70,7 +74,6 @@ def create_http_sampler(name, url, method, body=None):
         "enabled": "true",
     })
 
-    # Працюємо через Parameters, а не raw body
     sampler.append(bool_prop("HTTPSampler.postBodyRaw", False))
 
     # ------- ARGUMENTS BLOCK -------
@@ -86,15 +89,16 @@ def create_http_sampler(name, url, method, body=None):
         "name": "Arguments.arguments"
     })
 
-    # ---- 1) Query-параметри з URL (GET / будь-який метод з ?a=1&b=2) ----
+    # ---- Query параметри ----
     if query:
         for pair in query.split("&"):
             if "=" not in pair:
                 continue
             k, v = pair.split("=", 1)
+            k, v = unquote(k), unquote(v)
 
-            k = unquote(k)
-            v = unquote(v)
+            # 🔥 якщо значення містить host → замінюємо
+            v = v.replace(original_domain, "${base_url}")
 
             arg = ET.Element("elementProp", {
                 "name": k,
@@ -102,27 +106,24 @@ def create_http_sampler(name, url, method, body=None):
                 "enabled": "true",
             })
 
-            # основні поля
             arg.append(string_prop("Argument.name", k))
             arg.append(string_prop("Argument.value", v))
             arg.append(string_prop("Argument.metadata", "="))
-
-            # галочка URL Encode? → JMeter показує декодоване, шле encoded
             arg.append(bool_prop("HTTPArgument.always_encode", True))
             arg.append(bool_prop("HTTPArgument.use_equals", True))
             arg.append(string_prop("HTTPArgument.encoded", "false"))
 
             params_list.append(arg)
 
-    # ---- 2) Параметри з body (form-urlencoded) ----
+    # ---- Form-urlencoded body ----
     if body and "=" in body:
         for pair in body.split("&"):
             if "=" not in pair:
                 continue
             k, v = pair.split("=", 1)
+            k, v = unquote(k), unquote(v)
 
-            k = unquote(k)
-            v = unquote(v)
+            v = v.replace(original_domain, "${base_url}")
 
             arg = ET.Element("elementProp", {
                 "name": k,
@@ -133,19 +134,17 @@ def create_http_sampler(name, url, method, body=None):
             arg.append(string_prop("Argument.name", k))
             arg.append(string_prop("Argument.value", v))
             arg.append(string_prop("Argument.metadata", "="))
-
             arg.append(bool_prop("HTTPArgument.always_encode", True))
             arg.append(bool_prop("HTTPArgument.use_equals", True))
             arg.append(string_prop("HTTPArgument.encoded", "false"))
 
             params_list.append(arg)
 
-    # Додаємо всі параметри в sampler
     element_prop.append(params_list)
     sampler.append(element_prop)
 
     # ------- URL settings -------
-    sampler.append(string_prop("HTTPSampler.domain", domain))
+    sampler.append(string_prop("HTTPSampler.domain", "${base_url}"))
     sampler.append(string_prop("HTTPSampler.port", str(port)))
     sampler.append(string_prop("HTTPSampler.protocol", protocol))
     sampler.append(string_prop("HTTPSampler.path", path))
