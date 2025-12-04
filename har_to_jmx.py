@@ -188,15 +188,19 @@ def build_testplan_from_har(har_path: str, testplan_name: str = "HAR import plan
 
         name = f"{i:03d} {method} {url}"
         sampler = create_http_sampler(name, url, method, body)
-        tg_ht.append(sampler)
-        ET.SubElement(tg_ht, "hashTree")  # empty sampler tree
 
-        # --- ADD HEADERS ---
+        # додаємо request
+        tg_ht.append(sampler)
+
+        # створюємо вкладений hashTree для request
+        sampler_hash = ET.SubElement(tg_ht, "hashTree")
+
+        # ------- HEADERS (nested under request) -------
         headers = req.get("headers", [])
         header_manager = ET.Element("HeaderManager", {
             "guiclass": "HeaderPanel",
             "testclass": "HeaderManager",
-            "testname": f"Headers → {method} {urlparse(url).path}",
+            "testname": "Headers",
             "enabled": "true"
         })
 
@@ -209,7 +213,7 @@ def build_testplan_from_har(har_path: str, testplan_name: str = "HAR import plan
         for h in headers:
             name = h.get("name", "").strip()
             value = h.get("value", "").strip()
-            if not name or name.lower() in SKIP_HEADERS:  
+            if not name or name.lower() in SKIP_HEADERS:
                 continue
 
             hp = ET.Element("elementProp", {
@@ -220,8 +224,12 @@ def build_testplan_from_har(har_path: str, testplan_name: str = "HAR import plan
             hp.append(string_prop("Header.value", value))
             header_collection.append(hp)
 
-        tg_ht.append(header_manager)
-        ET.SubElement(tg_ht, "hashTree")
+        # додаємо HeaderManager всередину запиту
+        sampler_hash.append(header_manager)
+
+        # hashTree під HeaderManager також потрібен
+        ET.SubElement(sampler_hash, "hashTree")
+
 
 
     return root
