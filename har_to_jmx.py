@@ -2,6 +2,20 @@ import json
 import sys
 import xml.etree.ElementTree as ET
 from urllib.parse import urlparse, unquote
+from re import sub  
+
+def normalize_domain(value: str) -> str:
+    """Замінює домен в будь-якому форматі на ${base_url}."""
+    if not value:
+        return value
+
+    # Прибираємо http:// або https://
+    value = sub(r"https?://", "", value)
+
+    # Замінюємо домен навіть якщо після нього є /, ?, :, порт
+    value = sub(rf"\b{PRIMARY_DOMAIN}\b", "${base_url}", value)
+
+    return value
 
 # ------------ НАЛАШТУВАННЯ ------------- #
 ALLOWED_METHODS = {"GET", "POST"}
@@ -195,13 +209,12 @@ def build_header_manager(headers):
     for h in headers:
         name = h.get("name", "").strip()
         value = h.get("value", "").strip()
+
         if not name or name.lower() in skip:
             continue
 
-        # 🔥 Автоматична заміна домену без хардкоду
-        value = value.replace(f"https://{PRIMARY_DOMAIN}", "https://${base_url}")
-        value = value.replace(f"http://{PRIMARY_DOMAIN}", "http://${base_url}")
-        value = value.replace(PRIMARY_DOMAIN, "${base_url}")
+        # ✅ НОВА ЛОГІКА ЗАМІНИ ДОМЕНУ
+        value = normalize_domain(value)
 
         hp = ET.Element("elementProp", {
             "name": name,
